@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Karmabhumi Hair Salon — Live Queue</title>
+<meta name="theme-color" content="#050505">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="marquee"><div id="marquee"></div></div>
+
+<div class="wrap">
+  <header class="hero">
+    <div class="crest rise" id="crest"></div>
+    <div class="eyebrow rise" style="animation-delay:.08s">Live Queue</div>
+    <h1 class="rise" style="animation-delay:.14s" id="title">Karmabhumi</h1>
+    <div class="sub rise" style="animation-delay:.2s" id="subtitle">Hair Salon</div>
+    <div class="meta rise" style="animation-delay:.28s">
+      <span class="pill off" id="live"><i></i><span id="liveTxt">Connecting</span></span>
+      <span class="pill"><span class="clock" id="clock">--:--</span></span>
+    </div>
+    <div class="eyebrow rise" style="animation-delay:.34s;margin-top:18px;letter-spacing:.2em" id="date"></div>
+  </header>
+
+  <div id="meBox"></div>
+
+  <div class="stats rise" style="animation-delay:.4s;margin-top:26px">
+    <div class="stat hot"><b id="sCut">0</b><span>Cutting</span></div>
+    <div class="stat"><b id="sWait">0</b><span>Pending</span></div>
+    <div class="stat"><b id="sDone">0</b><span>Done</span></div>
+  </div>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Now <em>in the chair</em></h2><small id="cCut"></small></div>
+    <div id="cutting"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-h"><h2>Waiting <em>line</em></h2><small id="cWait"></small></div>
+    <div id="waiting"></div>
+  </section>
+
+  <p class="done-line" id="doneLine"></p>
+
+  <section class="contact">
+    <div class="eyebrow">Want to call us?</div>
+    <div class="nm" id="owner"></div>
+    <div class="ph" id="phoneTxt"></div>
+    <a class="btn-call" id="callBtn" href="#"><span id="callIco"></span>Call now</a>
+  </section>
+</div>
+
+<a class="fab" id="fab" href="#" aria-label="Call the salon"></a>
+
+<script src="js/config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/customer.js"></script>
+</body>
+</html>
