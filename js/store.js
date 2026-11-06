@@ -32,19 +32,32 @@ const PHONE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><
 const Store = (() => {
   const cfg = window.SALON || {};
   const fb = (cfg.firebaseUrl || '').trim().replace(/\/+$/, '');
-  const mode = fb ? 'cloud' : 'local';
+  /* cloud = Firebase (optional) | api = this site's /api (Vercel + Upstash) | local = opened as a file */
+  const mode = fb ? 'cloud' : (location.protocol === 'file:' ? 'local' : 'api');
   const PREFIX = 'kbs:day:';
+  let isAdmin = false;
 
   const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
   const norm = (d, x) => {
     const customers = x && x.customers ? (Array.isArray(x.customers) ? x.customers : Object.values(x.customers)) : [];
     return { date: d, customers: customers.filter(Boolean) };
   };
+  const httpErr = async (r) => {
+    const j = await r.json().catch(() => ({}));
+    const e = new Error(j.error || 'Server error'); e.code = r.status; return e;
+  };
+  const getPin = () => { try { return localStorage.getItem('kbs:pin') || ''; } catch { return ''; } };
+  const setPin = (p) => { try { localStorage.setItem('kbs:pin', p); } catch {} };
 
   let bc = null;
   try { bc = new BroadcastChannel('kbs'); } catch {}
 
   async function get(d) {
+    if (mode === 'api') {
+      const r = await fetch(`/api/day?date=${d}${isAdmin ? '&fresh=1' : ''}`, { cache: 'no-store' });
+      if (!r.ok) throw await httpErr(r);
+      return norm(d, await r.json());
+    }
     if (mode === 'cloud') {
       const r = await fetch(`${fb}/days/${d}.json`, { cache: 'no-store' });
       if (!r.ok) throw new Error('Cloud read failed');
@@ -54,7 +67,16 @@ const Store = (() => {
     try { raw = JSON.parse(localStorage.getItem(PREFIX + d)); } catch {}
     return norm(d, raw);
   }
-  async function save(day) {
+  async function write(day) {
+    if (mode === 'api') {
+      const r = await fetch(`/api/day?date=${day.date}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'x-admin-pin': getPin() },
+        body: JSON.stringify(day)
+      });
+      if (!r.ok) throw await httpErr(r);
+      return;
+    }
     if (mode === 'cloud') {
       const r = await fetch(`${fb}/days/${day.date}.json`, { method: 'PUT', body: JSON.stringify(day) });
       if (!r.ok) throw new Error('Cloud write failed');
@@ -63,12 +85,26 @@ const Store = (() => {
     localStorage.setItem(PREFIX + day.date, JSON.stringify(day));
     if (bc) bc.postMessage('changed');
   }
+
+  /* saves run one after another; polls that overlap a save are ignored so the UI never jumps back */
+  let queue = Promise.resolve(), inflight = 0, saveSeq = 0;
+  function save(day) {
+    saveSeq++; inflight++;
+    const snap = JSON.parse(JSON.stringify(day));
+    const p = queue.then(() => write(snap));
+    queue = p.catch(() => {});
+    return p.finally(() => { inflight--; saveSeq++; });
+  }
+
   async function listDays() {
+    if (mode === 'api') {
+      try { const r = await fetch('/api/days', { cache: 'no-store' }); return r.ok ? (await r.json()).days || [] : []; }
+      catch { return []; }
+    }
     if (mode === 'cloud') {
       try {
         const r = await fetch(`${fb}/days.json?shallow=true`, { cache: 'no-store' });
-        const j = await r.json();
-        return Object.keys(j || {}).sort().reverse();
+        return Object.keys((await r.json()) || {}).sort().reverse();
       } catch { return []; }
     }
     const out = [];
@@ -83,7 +119,14 @@ const Store = (() => {
   function subscribeToday(onDay, onStatus = () => {}) {
     let date = todayKey(), stop = () => {}, last = '';
     const push = (day) => { const s = JSON.stringify(day); if (s !== last) { last = s; onDay(day); } };
-    const refresh = async () => { try { push(await get(date)); onStatus(true); } catch { onStatus(false); } };
+    const refresh = async () => {
+      const seq = saveSeq;
+      try {
+        const day = await get(date);
+        if (inflight > 0 || seq !== saveSeq) return;
+        push(day); onStatus(true);
+      } catch (e) { onStatus(false, e); }
+    };
 
     function start() {
       date = todayKey(); last = '';
@@ -99,6 +142,10 @@ const Store = (() => {
         } catch {}
         const poll = setInterval(refresh, 10000);
         stop = () => { if (es) es.close(); clearInterval(poll); };
+      } else if (mode === 'api') {
+        /* customers: new data every ~6s (server cache 5s). admin: every 15s. */
+        const poll = setInterval(() => { if (!document.hidden) refresh(); }, isAdmin ? 15000 : 6000);
+        stop = () => clearInterval(poll);
       } else {
         const onStorage = (e) => { if (!e.key || e.key === PREFIX + date) refresh(); };
         window.addEventListener('storage', onStorage);
@@ -112,7 +159,7 @@ const Store = (() => {
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   }
 
-  return { mode, todayKey, get, save, listDays, subscribeToday };
+  return { mode, todayKey, get, save, listDays, subscribeToday, setPin, setAdmin: () => { isAdmin = true; } };
 })();
 
 /* Animated number */

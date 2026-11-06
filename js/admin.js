@@ -5,6 +5,7 @@ $('#title').textContent = S.name;
 document.title = 'Admin — ' + S.name;
 $('#openCustomer').onclick = () => window.open('index.html', '_blank');
 
+Store.setAdmin();
 let day = { date: Store.todayKey(), customers: [] };
 let loaded = false;
 const selected = new Set();
@@ -38,7 +39,16 @@ function ask({ title, text, input, ok = 'OK', cancel = 'Cancel' }) {
 function commit() {
   render();
   if (day.date !== Store.todayKey()) return;
-  Store.save(day).catch(() => toast('Could not save — check connection'));
+  saveNow();
+}
+function saveNow() {
+  Store.save(day).catch(async (e) => {
+    if (e && e.code === 401) {
+      const pin = await ask({ title: 'Admin PIN', text: 'Enter the PIN to save changes.', input: '', ok: 'Unlock' });
+      if (pin) { Store.setPin(pin.trim()); saveNow(); } else toast('Not saved — PIN needed');
+    } else if (e && e.code === 503) toast('Storage not connected — see README (Upstash)');
+    else toast('Could not save — check internet');
+  });
 }
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
 function setStatus(c, status) {
@@ -128,10 +138,13 @@ function render() {
 }
 
 /* live data (also picks up changes from another admin tab / device) */
+let warned = false;
 Store.subscribeToday((d) => {
   const first = !loaded;
   day = d; loaded = true;
   if (first || !document.activeElement || !document.activeElement.closest('dialog')) render();
+}, (ok, err) => {
+  if (!ok && err && err.code === 503 && !warned) { warned = true; toast('Storage not connected — see README (Upstash)'); }
 });
 
 /* ---------- reports ---------- */
