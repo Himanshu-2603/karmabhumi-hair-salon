@@ -78,7 +78,11 @@ async function rename(c) {
 }
 async function remove(c) {
   const ok = await ask({ title: 'Delete customer?', text: `"${c.name}" will be removed from today's list.`, ok: 'Delete' });
-  if (ok) { day.customers = day.customers.filter((x) => x.id !== c.id); selected.delete(c.id); commit(); toast('Deleted'); }
+  if (ok) {
+    day.customers = day.customers.filter((x) => x.id !== c.id); selected.delete(c.id);
+    day.removed = [...(day.removed || []), c.id].slice(-500);     /* so a self-booked name cannot come back */
+    commit(); toast('Deleted');
+  }
 }
 function move(c, dir) {
   const L = day.customers; const i = L.indexOf(c); let j = i + dir;
@@ -113,7 +117,7 @@ function card(c, kind, idx, total) {
     h('div', { class: 'top' },
       kind !== 'done' ? h('input', { class: 'chk', type: 'checkbox', checked: sel, onchange: (e) => { e.target.checked ? selected.add(c.id) : selected.delete(c.id); render(); } }) : null,
       h('div', { class: 'nm' }, h('span', {}, c.name), h('small', {}, t)),
-      h('span', { class: 'no' }, '#' + pad2(c.no))),
+      kind === 'waiting' ? h('span', { class: 'no pos' }, String(idx + 1)) : null),
     h('div', { class: 'acts' }, acts));
 }
 const fillCol = (box, nodes, msg) => box.replaceChildren(...(nodes.length ? nodes : [h('div', { class: 'col-empty' }, msg)]));
@@ -149,10 +153,33 @@ Store.subscribeToday((d) => {
 
 /* ---------- reports ---------- */
 $('#repDate').value = Store.todayKey();
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthLabel = (m) => { const [y, mo] = m.split('-').map(Number); return `${MONTHS[mo - 1]} ${y}`; };
+let allDays = [];
+
 async function loadDays() {
-  const days = await Store.listDays();
-  $('#dayChips').replaceChildren(...days.slice(0, 14).map((d) =>
+  Store.pruneOld();                                   /* local / Firebase modes (the server cleans api mode itself) */
+  allDays = await Store.listDays();
+  $('#dayChips').replaceChildren(...allDays.slice(0, 14).map((d) =>
     h('button', { class: 'chip', onclick: () => { $('#repDate').value = d; showReport(); } }, fmtDate(d))));
+
+  const months = [...new Set(allDays.map((d) => d.slice(0, 7)))].sort().reverse();
+  const sel = $('#repMonth'), keep = sel.value;
+  sel.replaceChildren(...(months.length ? months : [Store.todayKey().slice(0, 7)]).map((m) => h('option', { value: m }, monthLabel(m))));
+  if (keep && months.includes(keep)) sel.value = keep;
+
+  /* retention note */
+  const t = Store.todayKey(), [ty, tm, td] = t.split('-').map(Number);
+  const prev = tm === 1 ? `${ty - 1}-12` : `${ty}-${pad2(tm - 1)}`;
+  const hasPrev = months.includes(prev), note = $('#keepNote');
+  const lastDay = Store.GRACE_DAYS;
+  if (td <= lastDay && hasPrev) {
+    note.className = 'keep warn';
+    note.textContent = `${monthLabel(prev)} records will be deleted automatically after ${lastDay} ${MONTHS[tm - 1]}. Please export them now.`;
+  } else {
+    note.className = 'keep';
+    note.textContent = `Storage keeps ${monthLabel(t.slice(0, 7))} only. Last month's records stay until the ${lastDay}th of each month, then they are deleted automatically.`;
+  }
 }
 loadDays(); setInterval(loadDays, 30000);
 
@@ -169,20 +196,56 @@ async function showReport() {
   $('#repList').replaceChildren(...(s.customers.length ? s.customers.map((c) =>
     h('div', { class: 'card' + (c.status === 'done' ? ' done' : '') },
       h('div', { class: 'top' },
-        h('div', { class: 'nm' }, h('span', {}, c.name), h('small', {}, `Arrived ${fmtTime(c.addedAt)} · Started ${fmtTime(c.startedAt)} · Done ${fmtTime(c.doneAt)}`)),
-        h('span', { class: 'no' }, '#' + pad2(c.no))))) : [h('div', { class: 'col-empty' }, 'No data for this date')]));
+        h('div', { class: 'nm' }, h('span', {}, c.name), h('small', {}, `Arrived ${fmtTime(c.addedAt)} · Started ${fmtTime(c.startedAt)} · Done ${fmtTime(c.doneAt)}`))))) : [h('div', { class: 'col-empty' }, 'No data for this date')]));
 }
 $('#repShow').onclick = showReport;
+
+function printDoc(title, kind, metaL, metaR, head, rows, docTitle, extraClass) {
+  $('#print').replaceChildren(
+    h('div', { class: 'ph' }, h('h1', {}, info.name), h('p', {}, kind)),
+    h('div', { class: 'meta' }, h('span', {}, metaL), h('span', {}, metaR)),
+    h('table', { class: extraClass || '' }, h('thead', {}, h('tr', {}, head.map((x) => h('th', {}, x)))), h('tbody', {}, rows)),
+    h('div', { class: 'foot' }, `${info.owner} · ${info.phone} · Generated ${new Date().toLocaleString('en-IN')}`));
+  const old = document.title; document.title = docTitle;
+  setTimeout(() => { window.print(); document.title = old; }, 150);
+}
+
 $('#repPdf').onclick = async () => {
   const s = await getReport(); if (!s) return;
   if (!s.customers.length) { toast('No data for this date'); return; }
   const t = summary(s);
-  const rows = s.customers.map((c) => h('tr', {}, h('td', {}, String(c.no)), h('td', {}, c.name), h('td', {}, fmtTime(c.addedAt)), h('td', {}, fmtTime(c.startedAt)), h('td', {}, fmtTime(c.doneAt)), h('td', {}, c.status.toUpperCase())));
-  $('#print').replaceChildren(
-    h('div', { class: 'ph' }, h('h1', {}, info.name), h('p', {}, 'DAILY CUSTOMER REPORT')),
-    h('div', { class: 'meta' }, h('span', {}, 'Date: ' + fmtLongDate(s.date)), h('span', {}, `Total: ${t.total}  |  Done: ${t.done}` + (t.other ? `  |  Not finished: ${t.other}` : ''))),
-    h('table', {}, h('thead', {}, h('tr', {}, ['#', 'Customer', 'Arrived', 'Started', 'Done', 'Status'].map((x) => h('th', {}, x)))), h('tbody', {}, rows)),
-    h('div', { class: 'foot' }, `${info.owner} · ${info.phone} · Generated ${new Date().toLocaleString('en-IN')}`));
-  const old = document.title; document.title = `${info.name} - ${fmtDate(s.date)}`;
-  setTimeout(() => { window.print(); document.title = old; }, 150);
+  const rows = s.customers.map((c) => h('tr', {}, h('td', {}, c.name), h('td', {}, fmtTime(c.addedAt)), h('td', {}, fmtTime(c.startedAt)), h('td', {}, fmtTime(c.doneAt)), h('td', {}, c.status.toUpperCase())));
+  printDoc('', 'DAILY CUSTOMER REPORT', 'Date: ' + fmtLongDate(s.date),
+    `Total: ${t.total}  |  Done: ${t.done}` + (t.other ? `  |  Not finished: ${t.other}` : ''),
+    ['Customer', 'Arrived', 'Started', 'Done', 'Status'], rows, `${info.name} - ${fmtDate(s.date)}`);
+};
+
+/* ----- monthly export ----- */
+async function loadMonth() {
+  const m = $('#repMonth').value;
+  const days = allDays.filter((d) => d.startsWith(m)).sort();
+  if (!days.length) { toast('No data for this month'); return null; }
+  toast('Preparing ' + monthLabel(m) + '…');
+  const data = await Promise.all(days.map((d) => Store.get(d)));
+  const rows = [];
+  data.forEach((s) => s.customers.forEach((c) => rows.push({ date: s.date, ...c })));
+  if (!rows.length) { toast('No customers in this month'); return null; }
+  return { m, days: data.filter((s) => s.customers.length).length, rows };
+}
+$('#monPdf').onclick = async () => {
+  const r = await loadMonth(); if (!r) return;
+  const done = r.rows.filter((x) => x.status === 'done').length;
+  const trs = r.rows.map((c) => h('tr', {}, h('td', {}, fmtDate(c.date)), h('td', {}, c.name), h('td', {}, fmtTime(c.addedAt)), h('td', {}, fmtTime(c.startedAt)), h('td', {}, fmtTime(c.doneAt)), h('td', {}, c.status.toUpperCase())));
+  printDoc('', 'MONTHLY CUSTOMER REPORT', 'Month: ' + monthLabel(r.m),
+    `Customers: ${r.rows.length}  |  Done: ${done}  |  Working days: ${r.days}`,
+    ['Date', 'Customer', 'Arrived', 'Started', 'Done', 'Status'], trs, `${info.name} - ${monthLabel(r.m)}`, 'mon');
+};
+$('#monCsv').onclick = async () => {
+  const r = await loadMonth(); if (!r) return;
+  const esc = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+  const lines = [['Date', 'Customer', 'Arrived', 'Started', 'Done', 'Status'].map(esc).join(',')]
+    .concat(r.rows.map((c) => [fmtDate(c.date), c.name, fmtTime(c.addedAt), fmtTime(c.startedAt), fmtTime(c.doneAt), c.status].map(esc).join(',')));
+  const a = h('a', { href: URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })), download: `karmabhumi-${r.m}.csv` });
+  document.body.append(a); a.click(); a.remove();
+  toast('CSV downloaded');
 };

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Add your name — Karmabhumi Hair Salon</title>
+<meta name="theme-color" content="#050505">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="marquee"><div id="marquee"></div></div>
+
+<main class="wrap ap-wrap">
+  <header class="ap-head">
+    <div class="crest rise" id="crest"></div>
+    <div class="eyebrow rise" style="animation-delay:.08s">Karmabhumi · Hair Salon</div>
+    <h1 class="rise" style="animation-delay:.14s">Add your <em>name</em></h1>
+    <p class="ap-lead rise" style="animation-delay:.2s">Write your name once and we will save your place in today's line.</p>
+  </header>
+
+  <!-- step 1: form -->
+  <section id="formView" class="ap-card rise" style="animation-delay:.28s">
+    <form id="apForm" novalidate autocomplete="off">
+      <label class="ap-label" for="apName">Your name</label>
+      <div class="ap-field">
+        <input id="apName" name="name" type="text" maxlength="40"
+               autocapitalize="words" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done" inputmode="text" required>
+        <span class="ap-count" id="apCount">0/40</span>
+      </div>
+      <p class="ap-err" id="apErr" role="alert" aria-live="polite"></p>
+
+      <button class="ap-save" id="apSave" type="submit">
+        <span class="lbl">Confirm</span>
+        <span class="spin" aria-hidden="true"></span>
+      </button>
+    </form>
+
+    <div class="ap-now" id="apNow" hidden><i></i><span id="apNowTxt"></span></div>
+  </section>
+
+  <!-- step 2: thank you -->
+  <section id="thanksView" class="ap-card ap-thanks" hidden>
+    <svg class="ap-tick" viewBox="0 0 80 80" aria-hidden="true">
+      <circle cx="40" cy="40" r="36" />
+      <path d="M24 41 L35 52 L57 29" />
+    </svg>
+    <div class="eyebrow">Booking confirmed</div>
+    <h2 id="thName">Thank you!</h2>
+    <p class="ap-msg">Your name is in the line.<br>Please sit back and relax — we will call you soon.</p>
+    <div class="ap-token">
+      <div><small>Ahead of you</small><b id="thAhead">0</b></div>
+    </div>
+    <div class="ap-redir"><div class="bar"><i id="thBar"></i></div><span id="thTxt">Opening the live queue…</span></div>
+    <div class="ap-actions">
+      <a class="btn" href="index.html">View live queue</a>
+      <button class="btn ghost" id="thAnother" type="button">Add another person</button>
+    </div>
+  </section>
+
+  <p class="ap-foot">Need help? <a id="callLink" href="#">Call the salon</a></p>
+</main>
+
+<script src="js/config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/appointment.js"></script>
+</body>
+</html>

@@ -38,9 +38,17 @@ const Store = (() => {
   let isAdmin = false;
 
   const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  /* Retention: keep this month; keep last month only for the first GRACE_DAYS days of a month.
+     (api mode is cleaned by the server; local / Firebase modes are cleaned from the admin page.) */
+  const GRACE_DAYS = 7;
+  const cutoffKey = (t) => {
+    let [y, m, d] = (t || todayKey()).split('-').map(Number);
+    if (d <= GRACE_DAYS) { m -= 1; if (m === 0) { m = 12; y -= 1; } }
+    return `${y}-${pad2(m)}-01`;
+  };
   const norm = (d, x) => {
     const customers = x && x.customers ? (Array.isArray(x.customers) ? x.customers : Object.values(x.customers)) : [];
-    return { date: d, customers: customers.filter(Boolean) };
+    return { date: d, customers: customers.filter(Boolean), removed: Array.isArray(x && x.removed) ? x.removed : [] };
   };
   const httpErr = async (r) => {
     const j = await r.json().catch(() => ({}));
@@ -96,6 +104,51 @@ const Store = (() => {
     return p.finally(() => { inflight--; saveSeq++; });
   }
 
+  /* Customer self-booking: adds one name to today's waiting list. Returns { customer, ahead }. */
+  async function book(name, id) {
+    if (mode === 'api') {
+      const r = await fetch('/api/book', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name })
+      });
+      if (!r.ok) throw await httpErr(r);
+      const j = await r.json();
+      return { customer: j.customer, ahead: j.ahead || 0, date: j.date };
+    }
+    const date = todayKey();
+    const day = await get(date);
+    let c = day.customers.find((x) => x.id === id);
+    if (!c) {
+      const no = day.customers.reduce((m, x) => Math.max(m, x.no || 0), 0) + 1;
+      c = { id, no, name, status: 'waiting', src: 'customer', addedAt: new Date().toISOString(), startedAt: null, doneAt: null };
+      day.customers.push(c);
+      await write(day);
+    }
+    const ahead = day.customers.filter((x) => x.status === 'waiting').findIndex((x) => x.id === id);
+    return { customer: { id: c.id, no: c.no, name: c.name, addedAt: c.addedAt }, ahead: Math.max(ahead, 0), date };
+  }
+
+  /* delete days outside the retention window (local + Firebase modes only) */
+  async function pruneOld() {
+    if (mode === 'api') return 0;
+    const cut = cutoffKey(); let n = 0;
+    if (mode === 'cloud') {
+      try {
+        const r = await fetch(`${fb}/days.json?shallow=true`, { cache: 'no-store' });
+        const all = Object.keys((await r.json()) || {});
+        for (const d of all) if (d < cut) { await fetch(`${fb}/days/${d}.json`, { method: 'DELETE' }); n++; }
+      } catch {}
+      return n;
+    }
+    const del = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIX) && k.slice(PREFIX.length) < cut) del.push(k);
+    }
+    del.forEach((k) => { localStorage.removeItem(k); n++; });
+    return n;
+  }
+
   async function listDays() {
     if (mode === 'api') {
       try { const r = await fetch('/api/days', { cache: 'no-store' }); return r.ok ? (await r.json()).days || [] : []; }
@@ -104,7 +157,7 @@ const Store = (() => {
     if (mode === 'cloud') {
       try {
         const r = await fetch(`${fb}/days.json?shallow=true`, { cache: 'no-store' });
-        return Object.keys((await r.json()) || {}).sort().reverse();
+        return Object.keys((await r.json()) || {}).filter((d) => d >= cutoffKey()).sort().reverse();
       } catch { return []; }
     }
     const out = [];
@@ -112,7 +165,7 @@ const Store = (() => {
       const k = localStorage.key(i);
       if (k && k.startsWith(PREFIX)) out.push(k.slice(PREFIX.length));
     }
-    return out.sort().reverse();
+    return out.filter((d) => d >= cutoffKey()).sort().reverse();
   }
 
   /* Live subscription to TODAY (re-subscribes automatically at midnight). */
@@ -143,8 +196,8 @@ const Store = (() => {
         const poll = setInterval(refresh, 10000);
         stop = () => { if (es) es.close(); clearInterval(poll); };
       } else if (mode === 'api') {
-        /* customers: new data every ~6s (server cache 5s). admin: every 15s. */
-        const poll = setInterval(() => { if (!document.hidden) refresh(); }, isAdmin ? 15000 : 6000);
+        /* customers: new data every ~6s (server cache 5s). admin: every 8s. */
+        const poll = setInterval(() => { if (!document.hidden) refresh(); }, isAdmin ? 8000 : 6000);
         stop = () => clearInterval(poll);
       } else {
         const onStorage = (e) => { if (!e.key || e.key === PREFIX + date) refresh(); };
@@ -159,7 +212,7 @@ const Store = (() => {
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   }
 
-  return { mode, todayKey, get, save, listDays, subscribeToday, setPin, setAdmin: () => { isAdmin = true; } };
+  return { mode, todayKey, cutoffKey, GRACE_DAYS, get, save, book, pruneOld, listDays, subscribeToday, setPin, setAdmin: () => { isAdmin = true; } };
 })();
 
 /* Animated number */

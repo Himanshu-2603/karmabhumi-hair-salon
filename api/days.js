@@ -1,15 +1,17 @@
 'use strict';
-/* GET /api/days -> { days: ["2026-11-06", ...] } newest first (for the report date chips) */
+/* GET /api/days -> { days: ["2026-11-06", ...], today, cutoff }  newest first (report date chips + month export).
+   Also runs the once-a-day clean-up that deletes records outside the retention window. */
 const { redis } = require('./_redis');
+const { DAY_RE, todayKey, cutoffKey, cleanup, send } = require('./_common');
+
 module.exports = async (req, res) => {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
   try {
+    const today = todayKey(), cutoff = cutoffKey(today);
+    try { await cleanup(redis); } catch (e) { /* never block the list because of clean-up */ }
     const list = (await redis(['SMEMBERS', 'kbs:days'])) || [];
-    res.statusCode = 200;
-    res.end(JSON.stringify({ days: list.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse() }));
+    const days = list.filter((d) => DAY_RE.test(d) && d >= cutoff).sort().reverse();
+    send(res, 200, { days, today, cutoff });
   } catch (e) {
-    res.statusCode = e.code === 503 ? 503 : 502;
-    res.end(JSON.stringify({ error: e.message || 'Server error' }));
+    send(res, e.code === 503 ? 503 : 502, { error: e.message || 'Server error' });
   }
 };
